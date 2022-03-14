@@ -1,0 +1,393 @@
+---
+title: "Project 03"
+output:
+  html_document:
+    theme: cosmo
+    highlight: zenburn
+    css: note-style.css
+  pdf_document: default
+---
+
+## Overview
+
+Each of the five prompts below provide a question prompt that you need to
+address with one or more tables and/or plots. You only need to include text
+where explicitly asked for, however please include each graphic or output in
+its own code chunk. However you do need to properly label each plot (just a
+title is okay, but axes should have labels and color palettes should be
+chosen appropriately).
+
+More detailed instructions are given on the Project 3 page linked to from the
+course website.
+
+**Project Team**: Eliza Herrenkohl, Ani Laliashvili, John Cruz, Anna Cheng
+
+## Getting Started
+
+Before running this notebook, select "Session > Restart R and Clear Output" in
+the menu above to start a new R session. This will clear any old data sets and
+give us a blank slate to start with.
+
+After starting a new session, run the following code chunk to load the
+libraries and data that we will be working with today.
+
+```{r, include=FALSE, message=FALSE}
+library(tidyverse)
+library(ggrepel)
+library(smodels)
+library(stringi)
+library(lubridate)
+library(sf)
+library(units)
+library(RcppRoll)
+
+theme_set(theme_minimal())
+options(dplyr.summarise.inform = FALSE)
+options(width = 77L)
+options(lubridate.week.start = 1)
+Sys.setlocale(locale = "en_US.UTF-8")
+
+sm_centroid <- function(data) {
+  suppressWarnings({ z <- st_coordinates(st_centroid(data)) })
+  return(tibble(lon = z[,1], lat = z[,2]))
+}
+```
+
+### Load the Data
+
+There are three datasets that you will use in this project. They
+are similar to the datasets we had with the French data: a spatial
+object (county), a dataset of demographic data, and a dataset of
+daily Coronavirus records at the county level.
+
+```{r, message = FALSE}
+county <- read_sf(file.path("data", "us_counties.geojson"))
+covid <- read_csv(file.path("data", "us_county_covid.csv"))
+demog <- read_csv(file.path("data", "us_county_metadata.csv"))
+```
+
+The COVID-19 dataset has fewer columns than the one from France. It
+has only cumulative case counts and reported deaths. Note that these
+are only the counties with complete data from 01 April 2020.
+
+```{r}
+covid
+```
+
+The demographic data gives several points of information about each county.
+Unless otherwise noted, the data comes from 2019.
+
+```{r}
+demog
+```
+
+Most of the variables should be self-explanatory. Unemployment rate is in
+percentages (0-100), median household income in USD. February and August average
+temperatures are in Celsius. The `physicians_per_pop` give the number of active
+physicians per 100k residents according to the AAMC in 2018 at the state level.
+Note that there is information for almost every county in the US, even if there
+are no records in the COVID-19 dataset.
+
+
+```{r}
+covid_demog <- covid %>% 
+  left_join(demog, by = c('state', 'fips'))
+
+covid_all <- county %>%
+  left_join(covid_demog, by= c('fips', 'state'))
+```
+
+## Prompts
+
+### 1. Spatial Extent
+
+**Question** Show a spatial visualization (i.e., a map) of the infection rate
+(cases per population) in the U.S. on 1 May 2020, 15 June 2020, and 1 October
+for the "lower 48" states (no Hawaii, Alaska, or Puerto Rico). Also, separately
+show the infection rate for Hawaii on 15 June 2020. Try to describe the patterns
+in a few short sentences. Make sure to use appropriate projections and color
+scales.
+
+```{r fig.width=5, fig.asp = .80}
+covid_all  %>%
+  filter(state != 'HI' & state != 'AK' & state != 'PR' & date == '2020-05-01') %>%
+  mutate(infection_rate = cases * 1000 / population) %>%
+  st_transform(3083) %>%
+  ggplot() +
+    geom_sf(aes(fill=infection_rate), color = 'black', size = 0) +
+    scale_fill_distiller(trans = "log2", palette = "Spectral", guide = "legend", 
+                         name = "Infection Rate", n.breaks = 10) +
+    labs(
+       title = 'Infection Rates for 48 U.S. States',
+       subtitle = 'May 1, 2020; Per 1000 People'
+       )
+```
+
+On May 1 the infection rates in the counties of 48 U.S. states seem to be mostly light green, around 0.5 to 1 cases per 1000 people. There are few counties with the lowest 0.03 cases per 1000 people. The highest rate observed is 64 cases per 1000 people.
+
+```{r fig.width=5, fig.asp = .80}
+covid_all  %>%
+  filter(state != 'HI' & state != 'AK' & state != 'PR' & date == '2020-06-15') %>%
+  mutate(infection_rate = cases * 1000 / population) %>%
+  st_transform(3083) %>%
+  ggplot() +
+    geom_sf(aes(fill=infection_rate), color = 'black', size = 0) +
+    scale_fill_distiller(trans = "log2", palette = "Spectral", guide = "legend", 
+                         n.breaks = 10, name = "Infection Rate") +
+    labs(
+       title = 'Infection Rates for 48 U.S. States',
+       subtitle = 'June 15, 2020; Per 1000 People'
+       )
+```
+
+On June 15 the minimum and the maximum infection rates observed in the 48 U.S. states have increased compared to those on May 1. Most states still remain light green, now denoting 0.25 cases per 1000 people. There are very few counties with the lowest 0.06 cases per 1000 people and the highest rate observed is now 128 cases per 1000 people.
+
+```{r fig.width=5, fig.asp = .80}
+covid_all  %>%
+  filter(state != 'HI' & state != 'AK' & state != 'PR' & date == '2020-10-01') %>%
+  mutate(infection_rate = cases * 1000 / population) %>%
+  st_transform(3083) %>%
+  ggplot() +
+    geom_sf(aes(fill = infection_rate), color = 'black', size = 0) +
+    scale_fill_distiller(trans = "log2", palette = "Spectral", guide = "legend",
+                         n.breaks = 10, name = "Infection Rate") +
+    labs(
+       title = 'Infection Rates for 48 U.S. States',
+       subtitle = 'October 1, 2020; Per 1000 People'
+       )
+```
+
+On October 1, the minimum and the maximum infection rates observed in the 48 U.S. states have again increased compared to those on May 1 and June 15. We observe many states in yellow and red, with the Northeast being the only region where blue and light green colors are more dominant. There are very few counties with the lowest 1 case per 1000 people and the highest rate observed is still standing at 128 cases per 1000 people.
+
+```{r fig.width=5, fig.asp = .80}
+covid_all  %>%
+  filter(state == 'HI' & date == '2020-06-15') %>%
+  mutate(infection_rate = cases * 1000 / population) %>%
+  st_transform(3083) %>%
+  ggplot() +
+    geom_sf(aes(fill = infection_rate), color = 'black', size = 0) +
+    scale_fill_distiller(guide = "legend", palette = "Spectral", 
+                         name = "Infection Rate", n.breaks = 4) +
+    labs(
+       title = 'Infection Rates for Hawaii',
+       subtitle = 'June 15, 2020; Per 1000 People'
+       )
+```
+
+On June 15, we observe the infection rate ranging from 0.3 to 0.7 cases per 1000 people in counties in Hawaii. All counties have different infection rates in this state, but overall the rates are much lower than most counties in the 48 U.S. states on the same day. 
+
+### 2. Political Party
+
+**Question** How does the general political affiliation at the county level
+relate to the observed case fatality rate (cases / deaths) and the overall
+infection rate (cases / population)? Answer the question on a month-by-month
+basis (i.e., compute the rates for each month separately, not cumulatively) and
+plot these showing the change over time.
+
+```{r fig.width=5, fig.asp = .80}
+plotdata <- covid_demog %>%
+  mutate(party_affiliation = if_else(per_dem_2016 > per_gop_2016,
+"Democrat", "Republican")) %>%
+  group_by(fips) %>%
+  mutate(cases = cases - lag(cases)) %>%
+  mutate(month = month(date)) %>%
+  group_by(month, fips) %>%
+  arrange(desc(date)) %>%
+  slice(1) %>%
+  filter(!is.na(cases)) %>%
+  group_by(party_affiliation, month) %>%
+  summarize(infection_rate = sum(cases) * 100 / sum(population))
+
+plotdata %>%
+   ggplot() +
+     geom_point(aes(month, infection_rate, color = party_affiliation)) +
+     labs(
+       title = 'Infection Rate by County Over Time',
+       subtitle = 'As Percentage Rate',
+       color = 'Political Affiliation',
+       y = "Infection Rate",
+       x = "Month"
+       ) +
+  scale_x_continuous(breaks = seq(4, 10, 1), labels = c("Apr", "May", "June", "July", 
+                                                      "Aug", "Sept", "Oct")) +
+scale_color_viridis_d()
+
+```
+
+We can see from the graph that the infection rate is higher in Democrat counties at first. The gap starts closing, however, and starting from July the infection rate in Republican counties exceeds that of the Democrat counties, with the difference in infection rates increasing between the two groups.
+
+```{r fig.width=5, fig.asp = .80}
+plotdata <- covid_demog %>%
+  mutate(party_affiliation = if_else(per_dem_2016 > per_gop_2016,
+                                     "Democrat", "Republican")) %>%
+  group_by(fips) %>%
+  mutate(deaths = deaths - lag(deaths)) %>%
+  mutate(month = month(date)) %>%
+  group_by(month, fips) %>%
+  arrange(desc(date)) %>%
+  slice(1) %>%
+  filter(!is.na(cases)) %>%
+  group_by(party_affiliation, month) %>%
+  summarize(fatality_rate = sum(cases) * 100 / sum(deaths))
+
+plotdata %>%
+   ggplot() +
+     geom_point(aes(month, fatality_rate, color = party_affiliation)) +
+     labs(
+       title = 'Fatality Rate by County Over Time',
+       subtitle = 'As Percentage Rate',
+       color = 'Political Affiliation',
+       y = "Fatality Rate",
+       x = "Month"
+       ) +
+  scale_x_continuous(breaks = seq(4, 10, 1), labels = c("Apr", "May", "June", "July", 
+                                                      "Aug", "Sept", "Oct")) +
+  scale_color_viridis_d() 
+
+```
+
+We observe a higher fatality rate (cases / deaths) in Republican counties until June of 2020. However, starting from June we start to see higher fatality rates in Democrat counties, with the gap widening overall.
+
+### 3. Largest Counties
+
+**Question** Visualize the number of new cases in the 8 largest counties (by population) over
+the time range of the entire dataset for each day using a 7-day moving average.
+
+```{r fig.width=5, fig.asp = .80}
+largest <- demog %>%
+              arrange(desc(population)) %>%
+              slice(1:8)
+
+covid_all %>%
+  filter(fips %in% largest$fips) %>%
+  group_by(fips) %>%
+  mutate(cases = cases - lag(cases)) %>%
+  mutate(roll_cases = roll_meanr(cases, n = 7, fill = NA)) %>%
+  select(county, fips, date, cases, roll_cases) %>%
+  ggplot() +
+    geom_line(aes(date, roll_cases, color = county)) +
+    labs(
+    title = "Rolling 7 Day Average of the Top 8 Counties in the US",
+      x = "Date",
+      y = "Cases",
+    color = "County"
+    )
+```
+
+In the plot above we can see the 7-day moving average of new COVID-19 cases for the 8 largest counties in the U.S.
+
+### 4. Population Density
+
+**Question** Compute the population density of each county. Group the counties
+into 5 groups based on their population density and compute the overall fatality
+rate (cases / deaths), infection rate (cases / population) and mortality rate
+(deaths / cases) for each group on 1 October.
+
+```{r fig.width=5, fig.asp = .80}
+rates_calc <- county %>%
+  left_join(demog, by = c("fips", "state")) %>%
+  mutate(area = as.numeric(set_units(st_area(geometry), "km^2"))) %>%
+  mutate(density = population / area) %>%
+  mutate(bucket = cut(log2(density + 1), breaks = 5, labels = FALSE)) %>%
+  as_tibble() %>%
+  left_join(covid, by = c("fips", "state")) %>%
+  filter(date == "2020-10-01") %>%
+  group_by(bucket) %>%
+  mutate(cases_sum = sum(cases)) %>%
+  mutate(deaths_sum = sum(deaths)) %>%
+  mutate(pop_sum = sum(population)) %>%
+  mutate(fatality_rate = cases_sum / deaths_sum) %>% 
+  mutate(infection_rate = cases_sum / pop_sum) %>%
+  mutate(mortality_rate = deaths_sum / cases_sum) %>%
+  group_by(bucket) %>%
+  slice(1) 
+
+head(rates_calc)
+```
+
+```{r fig.width=5, fig.asp = .80}
+rates_calc %>%
+  ggplot() +
+    geom_col(aes(bucket, fatality_rate, fill = bucket), show.legend = FALSE) + 
+    labs(
+       title = 'Overall Fatality Rate by Density Level',
+       subtitle = 'October 1, 2020',
+       y = "Fatality Rate",
+       x = "Density Level (Low to High)"
+       ) +
+    scale_color_viridis_d()
+```
+
+```{r}
+rates_calc %>%
+  ggplot() +
+    geom_col(aes(bucket, infection_rate, fill = bucket), show.legend = FALSE) +
+    labs(
+       title = 'Infection Rate by Density Level',
+       subtitle = 'October 1, 2020',
+       y = "Infection Rate",
+       x = "Density Level (Low to High)"
+       ) +
+    scale_color_viridis_d()
+```  
+
+```{r fig.width=5, fig.asp = .80}
+rates_calc %>%
+  ggplot() +
+    geom_col(aes(bucket, mortality_rate, fill = bucket), show.legend = FALSE) +
+    labs(
+       title = 'Mortality Rate by Density Level',
+       subtitle = 'October 1, 2020',
+       y = "Mortality Rate",
+       x = "Density Level (Low to High)"
+       ) +
+    scale_color_viridis_d()
+```
+
+### 5. Cases and Deaths Lag
+
+**Question** At the county level, aggregated over each week, what's the "lag"
+between deaths and cases? That is, if we look at the number of deaths in one
+week in the dataset is it most closely correlated with the number of cases in
+the week in question, one week before, two weeks before, three weeks before,
+or more? As an optional challenge, try to plot the relationship without
+resorting to manually copying the numbers (you might need a pivot function
+here).
+```{r fig.width=5, fig.asp = .80}
+covid_demog %>%
+    group_by(fips) %>%
+    mutate(weekday = wday(date)) %>%
+    filter(weekday == 1) %>%
+    mutate(cases_new = cases - lag(cases)) %>%
+    mutate(deaths_new = deaths - lag(deaths)) %>%
+    mutate(cases_1week = lag(cases_new)) %>%
+    mutate(cases_2week = lag(cases_1week)) %>%
+    mutate(cases_3week = lag(cases_2week)) %>%
+    mutate(cases_4week = lag(cases_3week)) %>%
+    mutate(cases_5week = lag(cases_4week)) %>%
+    mutate(cases_6week = lag(cases_5week)) %>%
+    mutate(cases_7week = lag(cases_6week)) %>%
+    ungroup() %>%
+    summarize(sm_cor(deaths_new, cases_new), sm_cor(deaths_new, cases_1week), 
+              sm_cor(deaths_new, cases_2week), sm_cor(deaths_new, cases_3week),
+              sm_cor(deaths_new, cases_4week), sm_cor(deaths_new, cases_5week), 
+              sm_cor(deaths_new, cases_6week), sm_cor(deaths_new, cases_7week)) %>%
+    as.tibble() %>%
+    pivot_longer(cols = c(deaths_new_cases_new_cor, deaths_new_cases_1week_cor,
+                          deaths_new_cases_2week_cor, deaths_new_cases_3week_cor,
+                          deaths_new_cases_4week_cor, deaths_new_cases_5week_cor,
+                          deaths_new_cases_6week_cor, deaths_new_cases_7week_cor)) %>%
+    ggplot() +
+      geom_point(aes(x = name, y = value)) +
+      labs(
+       title = 'Correlation Between New Deaths and
+New Case Lagged Values, Weekly',
+       y = "Correlation Coefficient"
+       ) +
+       scale_x_discrete(name = "Lag", labels = c("0", "1", "2", "3", "4", 
+                                                 "5", "6", "7")) 
+```
+
+The weekly new deaths and new cases are correlated at 0.66, the correlation increases to 0.70 between weekly new deaths and the new cases a week before. That between the new deaths and the new cases from 2 weeks ago
+is higher at 0.73. The same for the new deaths and the new cases from 3 weeks ago is 0.75 and the correlation
+between the new deaths and the new cases from 4 weeks ago peaks at 0.76. We start to see a decrease in the  correlation between new deaths and the new cases from 5 weeks, 6 weeks and 7 weeks ago. These coefficients are 0.75, 0.71 and 0.67, respectively. Therefore, the weekly new deaths are most closely correlated with the new cases from 4 weeks ago.
